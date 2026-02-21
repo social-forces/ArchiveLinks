@@ -11,8 +11,7 @@ const WORKER_STAGGER_MS = 350;
 const manuscriptInput = document.getElementById("manuscript");
 const dropZone = document.getElementById("dropZone");
 const browseBtn = document.getElementById("browseBtn");
-const selectedFileEl = document.getElementById("selectedFile");
-const extractBtn = document.getElementById("extractBtn");
+const heroPanel = dropZone.closest(".hero");
 
 const reviewPanel = document.getElementById("reviewPanel");
 const linkList = document.getElementById("linkList");
@@ -80,7 +79,6 @@ dropZone.addEventListener("drop", (event) => {
 });
 
 manuscriptInput.addEventListener("change", onFileSelected);
-extractBtn.addEventListener("click", onExtract);
 archiveBtn.addEventListener("click", () => runArchive(getIncludedItems(), "Archiving included links"));
 retryBtn.addEventListener("click", () => runArchive(getIncludedUnresolvedItems(), "Retrying unresolved links"));
 downloadBtn.addEventListener("click", onDownloadCsv);
@@ -149,6 +147,7 @@ async function onExtract() {
     items = unique.map((url) => createItem(url, "extracted"));
     hasArchiveRun = false;
 
+    heroPanel.classList.add("hidden");
     reviewPanel.classList.remove("hidden");
     stepTo(2);
 
@@ -326,16 +325,10 @@ function createItem(url, source) {
 
 function onFileSelected() {
   const file = manuscriptInput.files?.[0];
-
   if (!file) {
-    selectedFileEl.textContent = "No file selected.";
-    extractBtn.disabled = true;
     return;
   }
-
-  selectedFileEl.textContent = `Selected: ${file.name}`;
-  extractBtn.disabled = false;
-  stepTo(1);
+  onExtract();
 }
 
 function render() {
@@ -359,6 +352,7 @@ function renderCard(row) {
   const statusClass = statusClassFor(row.status);
   const label = statusLabel(row.status, row.included);
   const toggleLabel = row.included ? "Skip" : "Include";
+  const showToggle = !isArchiving && !hasArchiveRun;
 
   const archivedHtml = row.archivedUrl
     ? `<a class="archived-link" href="${escapeHtml(row.archivedUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.archivedUrl)}</a>`
@@ -371,7 +365,7 @@ function renderCard(row) {
         <a class="source-link" href="${escapeHtml(row.originalUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.originalUrl)}</a>
         ${archivedHtml ? `<span class="archived-row">${archivedHtml}</span>` : ""}
       </div>
-      <button type="button" class="toggle-btn${row.included ? "" : " is-skipped"}" data-action="toggle-include" data-id="${row.id}" ${isArchiving ? "disabled" : ""}>${toggleLabel}</button>
+      ${showToggle ? `<button type="button" class="toggle-btn${row.included ? "" : " is-skipped"}" data-action="toggle-include" data-id="${row.id}">${toggleLabel}</button>` : ""}
     </div>
   `;
 }
@@ -381,7 +375,6 @@ function updateActionStates() {
   const hasIncluded = getIncludedItems().length > 0;
   const hasUnresolvedIncluded = getIncludedUnresolvedItems().length > 0;
 
-  extractBtn.disabled = isExtracting || !manuscriptInput.files?.[0];
   addUrlBtn.disabled = isExtracting || isArchiving;
   addUrlInput.disabled = isExtracting || isArchiving;
 
