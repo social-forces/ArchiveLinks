@@ -15,6 +15,8 @@ const resultsBody = document.getElementById("resultsBody");
 const SAVE_REQUEST_TIMEOUT_MS = 12000;
 const AVAILABILITY_REQUEST_TIMEOUT_MS = 8000;
 const MAX_PRESERVE_TIME_MS = 45000;
+const MAX_CONCURRENT_SAVES = 3;
+const WORKER_STAGGER_MS = 350;
 
 let results = [];
 let isPreserving = false;
@@ -127,24 +129,8 @@ preserveBtn.addEventListener("click", async () => {
   }
 
   renderResults();
-  setStatus(`Submitting ${results.length} links to Wayback Machine...`);
-
-  for (let i = 0; i < results.length; i += 1) {
-    const item = results[i];
-    item.status = "saving";
-    renderResults();
-
-    try {
-      const outcome = await preserveUrl(item.originalUrl);
-      item.archivedUrl = outcome.archivedUrl;
-      item.status = outcome.status;
-    } catch (error) {
-      item.status = "save request failed";
-      console.error(`Failed to save ${item.originalUrl}:`, error);
-    }
-
-    renderResults();
-  }
+  setStatus(`Submitting ${results.length} links to Wayback Machine (${Math.min(MAX_CONCURRENT_SAVES, results.length)} at a time)...`);
+  await runPreservationPool(results);
 
   const savedCount = results.filter((r) => r.status === "saved").length;
   const timedOutCount = results.filter((r) => r.status === "timed out").length;
@@ -165,6 +151,45 @@ preserveBtn.addEventListener("click", async () => {
   updateActionStates();
   renderResults();
 });
+
+async function runPreservationPool(items) {
+  const workerCount = Math.min(MAX_CONCURRENT_SAVES, items.length);
+  let nextIndex = 0;
+  let completed = 0;
+
+  async function worker(workerId) {
+    if (workerId > 0) {
+      await sleep(workerId * WORKER_STAGGER_MS);
+    }
+
+    while (nextIndex < items.length) {
+      const idx = nextIndex;
+      nextIndex += 1;
+      const item = items[idx];
+
+      item.status = "saving";
+      renderResults();
+
+      try {
+        const outcome = await preserveUrl(item.originalUrl);
+        item.archivedUrl = outcome.archivedUrl;
+        item.status = outcome.status;
+      } catch (error) {
+        item.status = "save request failed";
+        console.error(`Failed to save ${item.originalUrl}:`, error);
+      }
+
+      completed += 1;
+      setStatus(`Preserving links... ${completed}/${items.length} complete`);
+      renderResults();
+      await sleep(120);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: workerCount }, (_, i) => worker(i))
+  );
+}
 
 downloadBtn.addEventListener("click", () => {
   if (results.length === 0 || !hasPreserved) {
