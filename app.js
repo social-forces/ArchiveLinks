@@ -346,46 +346,33 @@ function render() {
     return;
   }
 
-  linkList.innerHTML = items.map(renderCard).join("");
+  const included = items.filter((r) => r.included).length;
+  const saved = items.filter((r) => r.status === "saved").length;
+  const header = `<div class="link-list-header">
+    <span class="link-count">${items.length} links${saved > 0 ? ` · ${saved} archived` : ""} · ${included} included</span>
+  </div>`;
+
+  linkList.innerHTML = header + items.map(renderCard).join("");
 }
 
 function renderCard(row) {
   const statusClass = statusClassFor(row.status);
-  const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(row.domain)}&sz=32`;
-  const sourceLabel = row.source === "manual" ? "Manual" : "Extracted";
-  const previewTitle = `${row.domain}${row.path}`;
+  const label = statusLabel(row.status, row.included);
+  const toggleLabel = row.included ? "Skip" : "Include";
 
   const archivedHtml = row.archivedUrl
     ? `<a class="archived-link" href="${escapeHtml(row.archivedUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.archivedUrl)}</a>`
-    : `<span class="muted">${row.included ? "To be archived" : "Skipped"}</span>`;
-
-  const skipLabel = row.skipReason === "doi"
-    ? `<span class="source-tag">Skipped (DOI)</span>`
     : "";
 
-  const toggleLabel = row.included ? "Skip" : "Include";
-
   return `
-    <article class="link-card" data-id="${row.id}">
-      <div class="card-left">
-        <div class="preview-badge" title="${escapeHtml(previewTitle)}">
-          <img src="${faviconUrl}" alt="" loading="lazy" />
-          <span>${escapeHtml(row.domain)}</span>
-        </div>
-      </div>
-      <div class="card-main">
-        <div class="card-head">
-          <span class="pill ${statusClass}">${escapeHtml(statusLabel(row.status, row.included))}</span>
-          <span class="source-tag">${sourceLabel}</span>
-          ${skipLabel}
-        </div>
+    <div class="link-row${row.included ? "" : " is-skipped"}" data-id="${row.id}">
+      <span class="status-dot ${statusClass}" title="${escapeHtml(label)}"></span>
+      <div class="link-content">
         <a class="source-link" href="${escapeHtml(row.originalUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.originalUrl)}</a>
-        <div class="archived-row">${archivedHtml}</div>
+        ${archivedHtml ? `<span class="archived-row">${archivedHtml}</span>` : ""}
       </div>
-      <div class="card-actions">
-        <button type="button" class="icon-btn" data-action="toggle-include" data-id="${row.id}" ${isArchiving ? "disabled" : ""}>${toggleLabel}</button>
-      </div>
-    </article>
+      <button type="button" class="toggle-btn${row.included ? "" : " is-skipped"}" data-action="toggle-include" data-id="${row.id}" ${isArchiving ? "disabled" : ""}>${toggleLabel}</button>
+    </div>
   `;
 }
 
