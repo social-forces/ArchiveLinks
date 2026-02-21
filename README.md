@@ -6,11 +6,13 @@ A static browser application that helps authors preserve cited web pages in the 
 
 1. Accepts manuscript upload (`.pdf` or `.docx`).
 2. Extracts all external HTTP(S) links locally in the browser.
-3. Opens a step-by-step review stage with bulk selection, deletion, and manual link add.
-4. Sends selected links to Wayback's **Save Page Now** endpoint (bounded parallel workers).
-5. Supports retrying unresolved links without reprocessing already archived ones.
-6. Polls Wayback availability for archived snapshot URLs with timeout/error handling.
-7. Exports a CSV of original links and preserved archive links.
+3. Opens a step-by-step review stage with manual link add and per-link skip/include control.
+4. Defaults to archiving all extracted links except DOI links, which are auto-skipped.
+5. Lets users toggle each link between `Skip` and `Include` without removing it from the list.
+6. Sends included links to Wayback's **Save Page Now** endpoint (bounded parallel workers).
+7. Supports retrying unresolved included links without reprocessing already archived ones.
+8. Polls Wayback availability for archived snapshot URLs with timeout/error handling.
+9. Exports a CSV of original links, archive links, inclusion state, and skip reason.
 
 ## Why this architecture
 

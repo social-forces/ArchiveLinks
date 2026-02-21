@@ -60,17 +60,11 @@
       <section class="panel review-panel hidden" id="reviewPanel">
         <div class="review-head">
           <h2>Review Links</h2>
-          <p class="muted">Edit links, select in bulk, then archive.</p>
+          <p class="muted">All non-DOI links are included by default. DOI links are skipped automatically.</p>
         </div>
 
         <div class="toolbar">
-          <label class="checkbox-row">
-            <input id="selectAll" type="checkbox" />
-            <span>Select all</span>
-          </label>
-          <span id="selectionCount" class="muted">0 selected</span>
-          <button id="deleteSelectedBtn" type="button" class="ghost-btn" disabled>Delete Selected</button>
-          <button id="archiveSelectedBtn" type="button" class="primary-btn" disabled>Archive Selected</button>
+          <button id="archiveBtn" type="button" class="primary-btn" disabled>Archive Included Links</button>
           <button id="retryBtn" type="button" class="ghost-btn" disabled>Retry Unresolved</button>
           <button id="downloadBtn" type="button" class="ghost-btn" disabled>Download CSV</button>
         </div>

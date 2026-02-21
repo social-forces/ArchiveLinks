@@ -454,13 +454,14 @@ button:disabled {
 }
 
 .icon-btn {
-  width: 2rem;
+  min-width: 4.25rem;
   height: 2rem;
   border-radius: 8px;
   border: 1px solid #d4d9e5;
   background: #fff;
   color: #576783;
-  font-size: 1.25rem;
+  font-size: 0.82rem;
+  font-weight: 700;
   line-height: 1;
 }
 

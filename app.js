@@ -18,10 +18,7 @@ const reviewPanel = document.getElementById("reviewPanel");
 const linkList = document.getElementById("linkList");
 const statusEl = document.getElementById("status");
 
-const selectAllInput = document.getElementById("selectAll");
-const selectionCountEl = document.getElementById("selectionCount");
-const deleteSelectedBtn = document.getElementById("deleteSelectedBtn");
-const archiveSelectedBtn = document.getElementById("archiveSelectedBtn");
+const archiveBtn = document.getElementById("archiveBtn");
 const retryBtn = document.getElementById("retryBtn");
 const downloadBtn = document.getElementById("downloadBtn");
 const addUrlInput = document.getElementById("addUrlInput");
@@ -84,20 +81,15 @@ dropZone.addEventListener("drop", (event) => {
 
 manuscriptInput.addEventListener("change", onFileSelected);
 extractBtn.addEventListener("click", onExtract);
+archiveBtn.addEventListener("click", () => runArchive(getIncludedItems(), "Archiving included links"));
+retryBtn.addEventListener("click", () => runArchive(getIncludedUnresolvedItems(), "Retrying unresolved links"));
+downloadBtn.addEventListener("click", onDownloadCsv);
 addUrlBtn.addEventListener("click", onAddManualUrl);
 addUrlInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
     onAddManualUrl();
   }
-});
-
-selectAllInput.addEventListener("change", () => {
-  const checked = selectAllInput.checked;
-  for (const row of items) {
-    row.selected = checked;
-  }
-  render();
 });
 
 linkList.addEventListener("click", (event) => {
@@ -116,98 +108,23 @@ linkList.addEventListener("click", (event) => {
     return;
   }
 
-  if (target.dataset.action === "remove") {
-    items = items.filter((entry) => entry.id !== id);
-    hasArchiveRun = hasSavedItem();
-    updateStatus(items.length ? "Link removed." : "No links left. Add links manually.", items.length === 0);
+  if (target.dataset.action === "toggle-include") {
+    if (row.included) {
+      row.included = false;
+      row.skipReason = row.skipReason || "manual";
+      row.status = "skipped";
+      row.archivedUrl = "";
+      updateStatus("Link marked to skip.");
+    } else {
+      row.included = true;
+      row.skipReason = null;
+      row.status = "ready";
+      updateStatus("Link marked for archiving.");
+    }
+
+    hasArchiveRun = items.some((item) => item.status === "saved");
     render();
   }
-});
-
-linkList.addEventListener("change", (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement)) {
-    return;
-  }
-
-  if (target.dataset.action !== "select") {
-    return;
-  }
-
-  const id = Number(target.dataset.id);
-  const row = items.find((entry) => entry.id === id);
-  if (!row) {
-    return;
-  }
-
-  row.selected = target.checked;
-  renderSelectionState();
-});
-
-deleteSelectedBtn.addEventListener("click", () => {
-  if (isArchiving) {
-    return;
-  }
-
-  const before = items.length;
-  items = items.filter((row) => !row.selected);
-
-  const removed = before - items.length;
-  if (removed === 0) {
-    return;
-  }
-
-  hasArchiveRun = hasSavedItem();
-  updateStatus(`Deleted ${removed} selected link(s).`);
-  render();
-});
-
-archiveSelectedBtn.addEventListener("click", async () => {
-  const selected = items.filter((row) => row.selected);
-  if (selected.length === 0) {
-    updateStatus("Select at least one link to archive.", true);
-    return;
-  }
-
-  await runArchive(selected, "Archiving selected links");
-});
-
-retryBtn.addEventListener("click", async () => {
-  const unresolvedSelected = items.filter((row) => row.selected && isUnresolved(row.status));
-  const unresolvedAll = items.filter((row) => isUnresolved(row.status));
-  const target = unresolvedSelected.length ? unresolvedSelected : unresolvedAll;
-
-  if (target.length === 0) {
-    updateStatus("No unresolved links to retry.");
-    return;
-  }
-
-  await runArchive(target, "Retrying unresolved links");
-});
-
-downloadBtn.addEventListener("click", () => {
-  if (!hasArchiveRun || items.length === 0) {
-    return;
-  }
-
-  const csvRows = [["original_url", "preserved_link", "status"]];
-  for (const row of items) {
-    csvRows.push([row.originalUrl, row.archivedUrl, row.status]);
-  }
-
-  const csvText = csvRows
-    .map((line) => line.map(escapeCsvCell).join(","))
-    .join("\n");
-
-  const blob = new Blob([csvText], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "archivelinks-results.csv";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
 });
 
 async function onExtract() {
@@ -235,10 +152,13 @@ async function onExtract() {
     reviewPanel.classList.remove("hidden");
     stepTo(2);
 
+    const doiSkipped = items.filter((row) => row.skipReason === "doi").length;
     if (items.length === 0) {
       updateStatus("No external HTTP(S) links found. Add URLs manually.", true);
+    } else if (doiSkipped > 0) {
+      updateStatus(`Found ${items.length} links. ${doiSkipped} DOI link(s) were auto-skipped.`);
     } else {
-      updateStatus(`Found ${items.length} links. Review and archive when ready.`);
+      updateStatus(`Found ${items.length} links. Ready to archive.`);
     }
 
     setProgress("Extraction complete", 100);
@@ -254,7 +174,12 @@ async function onExtract() {
 }
 
 async function runArchive(targetItems, label) {
-  if (isArchiving || targetItems.length === 0) {
+  if (isArchiving) {
+    return;
+  }
+
+  if (targetItems.length === 0) {
+    updateStatus("No included links to archive. Unskip at least one link first.", true);
     return;
   }
 
@@ -262,10 +187,8 @@ async function runArchive(targetItems, label) {
   stepTo(3);
 
   for (const row of targetItems) {
-    if (row.status !== "saved") {
-      row.archivedUrl = "";
-      row.status = "ready";
-    }
+    row.archivedUrl = "";
+    row.status = "ready";
   }
 
   setProgress(`${label}...`, 0);
@@ -313,18 +236,19 @@ async function runArchive(targetItems, label) {
   hasArchiveRun = true;
   isArchiving = false;
 
-  const saved = items.filter((row) => row.status === "saved").length;
-  const unresolved = items.filter((row) => isUnresolved(row.status)).length;
-  const timedOut = items.filter((row) => row.status === "timed out").length;
-  const failed = items.filter((row) => row.status === "save request failed").length;
+  const included = getIncludedItems();
+  const saved = included.filter((row) => row.status === "saved").length;
+  const unresolved = included.filter((row) => isUnresolved(row.status)).length;
+  const timedOut = included.filter((row) => row.status === "timed out").length;
+  const failed = included.filter((row) => row.status === "save request failed").length;
 
   if (unresolved > 0) {
     updateStatus(
-      `Archive run finished. ${saved}/${items.length} saved. ${unresolved} unresolved (${timedOut} timed out, ${failed} failed). Use Retry Unresolved.`,
+      `Archive run finished. ${saved}/${included.length} included links archived. ${unresolved} unresolved (${timedOut} timed out, ${failed} failed). Use Retry Unresolved.`,
       true
     );
   } else {
-    updateStatus(`Archive run finished. ${saved}/${items.length} saved.`);
+    updateStatus(`Archive run finished. ${saved}/${included.length} included links archived.`);
   }
 
   setProgress("Archiving complete", 100);
@@ -358,14 +282,42 @@ function onAddManualUrl() {
   render();
 }
 
+function onDownloadCsv() {
+  if (!hasArchiveRun || items.length === 0) {
+    return;
+  }
+
+  const csvRows = [["original_url", "preserved_link", "status", "included", "skip_reason"]];
+  for (const row of items) {
+    csvRows.push([row.originalUrl, row.archivedUrl, row.status, String(row.included), row.skipReason ?? ""]);
+  }
+
+  const csvText = csvRows
+    .map((line) => line.map(escapeCsvCell).join(","))
+    .join("\n");
+
+  const blob = new Blob([csvText], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "archivelinks-results.csv";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function createItem(url, source) {
   const parsed = new URL(url);
+  const doi = isDoiUrl(parsed);
+
   return {
     id: ++itemIdCounter,
     originalUrl: url,
     archivedUrl: "",
-    status: "ready",
-    selected: false,
+    status: doi ? "skipped" : "ready",
+    included: !doi,
+    skipReason: doi ? "doi" : null,
     source,
     domain: parsed.hostname,
     path: parsed.pathname || "/"
@@ -387,7 +339,6 @@ function onFileSelected() {
 }
 
 function render() {
-  renderSelectionState();
   updateActionStates();
 
   if (items.length === 0) {
@@ -403,16 +354,20 @@ function renderCard(row) {
   const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(row.domain)}&sz=32`;
   const sourceLabel = row.source === "manual" ? "Manual" : "Extracted";
   const previewTitle = `${row.domain}${row.path}`;
+
   const archivedHtml = row.archivedUrl
     ? `<a class="archived-link" href="${escapeHtml(row.archivedUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.archivedUrl)}</a>`
-    : `<span class="muted">Not archived yet</span>`;
+    : `<span class="muted">${row.included ? "To be archived" : "Skipped"}</span>`;
+
+  const skipLabel = row.skipReason === "doi"
+    ? `<span class="source-tag">Skipped (DOI)</span>`
+    : "";
+
+  const toggleLabel = row.included ? "Skip" : "Include";
 
   return `
     <article class="link-card" data-id="${row.id}">
       <div class="card-left">
-        <label class="checkbox-row card-check">
-          <input type="checkbox" data-action="select" data-id="${row.id}" ${row.selected ? "checked" : ""} />
-        </label>
         <div class="preview-badge" title="${escapeHtml(previewTitle)}">
           <img src="${faviconUrl}" alt="" loading="lazy" />
           <span>${escapeHtml(row.domain)}</span>
@@ -420,48 +375,31 @@ function renderCard(row) {
       </div>
       <div class="card-main">
         <div class="card-head">
-          <span class="pill ${statusClass}">${escapeHtml(statusLabel(row.status))}</span>
+          <span class="pill ${statusClass}">${escapeHtml(statusLabel(row.status, row.included))}</span>
           <span class="source-tag">${sourceLabel}</span>
+          ${skipLabel}
         </div>
         <a class="source-link" href="${escapeHtml(row.originalUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.originalUrl)}</a>
-        <div class="archived-row">
-          ${archivedHtml}
-        </div>
+        <div class="archived-row">${archivedHtml}</div>
       </div>
       <div class="card-actions">
-        <button type="button" class="icon-btn" data-action="remove" data-id="${row.id}" ${isArchiving ? "disabled" : ""}>×</button>
+        <button type="button" class="icon-btn" data-action="toggle-include" data-id="${row.id}" ${isArchiving ? "disabled" : ""}>${toggleLabel}</button>
       </div>
     </article>
   `;
 }
 
-function renderSelectionState() {
-  const selectedCount = items.filter((row) => row.selected).length;
-  selectionCountEl.textContent = `${selectedCount} selected`;
-
-  if (items.length === 0) {
-    selectAllInput.checked = false;
-    selectAllInput.indeterminate = false;
-    return;
-  }
-
-  selectAllInput.checked = selectedCount === items.length;
-  selectAllInput.indeterminate = selectedCount > 0 && selectedCount < items.length;
-}
-
 function updateActionStates() {
   const hasItems = items.length > 0;
-  const selectedCount = items.filter((row) => row.selected).length;
-  const hasUnresolved = items.some((row) => isUnresolved(row.status));
+  const hasIncluded = getIncludedItems().length > 0;
+  const hasUnresolvedIncluded = getIncludedUnresolvedItems().length > 0;
 
   extractBtn.disabled = isExtracting || !manuscriptInput.files?.[0];
   addUrlBtn.disabled = isExtracting || isArchiving;
   addUrlInput.disabled = isExtracting || isArchiving;
 
-  selectAllInput.disabled = isExtracting || isArchiving || !hasItems;
-  deleteSelectedBtn.disabled = isExtracting || isArchiving || selectedCount === 0;
-  archiveSelectedBtn.disabled = isExtracting || isArchiving || selectedCount === 0;
-  retryBtn.disabled = isExtracting || isArchiving || !hasUnresolved;
+  archiveBtn.disabled = isExtracting || isArchiving || !hasIncluded;
+  retryBtn.disabled = isExtracting || isArchiving || !hasUnresolvedIncluded;
   downloadBtn.disabled = isExtracting || isArchiving || !hasArchiveRun || !hasItems;
 }
 
@@ -500,16 +438,18 @@ function statusClassFor(status) {
   if (status === "saving") return "is-pending";
   if (status === "not yet indexed" || status === "timed out") return "is-warning";
   if (status === "save request failed") return "is-danger";
+  if (status === "skipped") return "is-neutral";
   return "is-neutral";
 }
 
-function statusLabel(status) {
-  if (status === "ready") return "Ready";
+function statusLabel(status, included) {
+  if (!included || status === "skipped") return "Skipped";
+  if (status === "ready") return "To Be Archived";
   if (status === "saving") return "Archiving";
   if (status === "saved") return "Archived";
   if (status === "not yet indexed") return "Not Indexed Yet";
   if (status === "timed out") return "Timed Out";
-  if (status === "save request failed") return "Failed";
+  if (status === "save request failed") return "Archive Failed";
   return status;
 }
 
@@ -517,8 +457,22 @@ function isUnresolved(status) {
   return status === "not yet indexed" || status === "timed out" || status === "save request failed";
 }
 
-function hasSavedItem() {
-  return items.some((row) => row.status === "saved");
+function getIncludedItems() {
+  return items.filter((row) => row.included);
+}
+
+function getIncludedUnresolvedItems() {
+  return items.filter((row) => row.included && isUnresolved(row.status));
+}
+
+function isDoiUrl(parsedUrl) {
+  const host = parsedUrl.hostname.toLowerCase();
+  if (host === "doi.org" || host.endsWith(".doi.org")) {
+    return true;
+  }
+
+  const combined = `${parsedUrl.hostname}${parsedUrl.pathname}`.toLowerCase();
+  return combined.includes("doi.org/") || /^\/(doi\/)?10\.\d{4,9}\//.test(parsedUrl.pathname.toLowerCase());
 }
 
 async function extractUrlsFromFile(file, onProgress) {
