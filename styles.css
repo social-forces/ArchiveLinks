@@ -70,6 +70,30 @@ header p {
   margin-bottom: 0.55rem;
 }
 
+.about p {
+  margin: 0.4rem 0;
+}
+
+.about-links {
+  display: flex;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+  margin-top: 0.7rem;
+}
+
+.about-links a {
+  display: inline-block;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid #c6d8f2;
+  border-radius: 8px;
+  background: #eef5ff;
+  text-decoration: none;
+}
+
+.about-links a:hover {
+  background: #ddeeff;
+}
+
 .controls input[type="file"] {
   display: block;
   margin-top: 0.55rem;

@@ -12,6 +12,10 @@ const phase2Panel = document.getElementById("phase2Panel");
 const statusEl = document.getElementById("status");
 const resultsBody = document.getElementById("resultsBody");
 
+const SAVE_REQUEST_TIMEOUT_MS = 12000;
+const AVAILABILITY_REQUEST_TIMEOUT_MS = 8000;
+const MAX_PRESERVE_TIME_MS = 45000;
+
 let results = [];
 let isPreserving = false;
 let hasPreserved = false;
@@ -131,9 +135,9 @@ preserveBtn.addEventListener("click", async () => {
     renderResults();
 
     try {
-      const archive = await preserveUrl(item.originalUrl);
-      item.archivedUrl = archive;
-      item.status = archive ? "saved" : "not yet indexed";
+      const outcome = await preserveUrl(item.originalUrl);
+      item.archivedUrl = outcome.archivedUrl;
+      item.status = outcome.status;
     } catch (error) {
       item.status = "save request failed";
       console.error(`Failed to save ${item.originalUrl}:`, error);
@@ -143,11 +147,13 @@ preserveBtn.addEventListener("click", async () => {
   }
 
   const savedCount = results.filter((r) => r.status === "saved").length;
+  const timedOutCount = results.filter((r) => r.status === "timed out").length;
+  const failedCount = results.filter((r) => r.status === "save request failed").length;
   const unresolved = results.length - savedCount;
 
   if (unresolved > 0) {
     setStatus(
-      `Done. Saved ${savedCount}/${results.length}. ${unresolved} may need retry in a few minutes (Wayback indexing delay).`,
+      `Done. Saved ${savedCount}/${results.length}. ${unresolved} unresolved (${timedOutCount} timed out, ${failedCount} failed). Retry unresolved links.`,
       true
     );
   } else {
@@ -384,40 +390,72 @@ function normalizeUrl(input) {
 async function preserveUrl(originalUrl) {
   const saveEndpoint = `https://web.archive.org/save/${encodeURIComponent(originalUrl)}`;
 
+  let saveRequestAttempted = false;
+
   try {
-    await fetch(saveEndpoint, {
-      method: "GET",
-      mode: "no-cors",
-      cache: "no-store"
-    });
+    await fetchWithTimeout(
+      saveEndpoint,
+      {
+        method: "GET",
+        mode: "no-cors",
+        cache: "no-store"
+      },
+      SAVE_REQUEST_TIMEOUT_MS
+    );
+    saveRequestAttempted = true;
   } catch {
     await triggerImageRequest(saveEndpoint);
+    saveRequestAttempted = true;
   }
 
-  const archived = await pollForArchivedUrl(originalUrl);
-  return archived;
+  const availability = await pollForArchivedUrl(originalUrl, MAX_PRESERVE_TIME_MS);
+  if (availability.archivedUrl) {
+    return { archivedUrl: availability.archivedUrl, status: "saved" };
+  }
+
+  if (availability.timedOut) {
+    return { archivedUrl: "", status: "timed out" };
+  }
+
+  if (saveRequestAttempted) {
+    return { archivedUrl: "", status: "not yet indexed" };
+  }
+
+  return { archivedUrl: "", status: "save request failed" };
 }
 
-async function pollForArchivedUrl(originalUrl) {
+async function pollForArchivedUrl(originalUrl, maxDurationMs) {
   const attempts = 8;
   const delayMs = 3000;
+  const startedAt = Date.now();
 
   for (let i = 0; i < attempts; i += 1) {
+    if (Date.now() - startedAt > maxDurationMs) {
+      return { archivedUrl: "", timedOut: true };
+    }
+
     const availabilityEndpoint = `https://archive.org/wayback/available?url=${encodeURIComponent(originalUrl)}`;
 
     try {
-      const response = await fetch(availabilityEndpoint, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        cache: "no-store"
-      });
+      const response = await fetchWithTimeout(
+        availabilityEndpoint,
+        {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store"
+        },
+        AVAILABILITY_REQUEST_TIMEOUT_MS
+      );
 
       if (response.ok) {
         const data = await response.json();
         const closest = data?.archived_snapshots?.closest;
 
         if (closest?.available && closest?.url) {
-          return closest.url.replace("http://", "https://");
+          return {
+            archivedUrl: closest.url.replace("http://", "https://"),
+            timedOut: false
+          };
         }
       }
     } catch (error) {
@@ -427,7 +465,18 @@ async function pollForArchivedUrl(originalUrl) {
     await sleep(delayMs);
   }
 
-  return "";
+  return { archivedUrl: "", timedOut: false };
+}
+
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function escapeCsvCell(value) {
