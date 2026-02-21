@@ -15,7 +15,7 @@ const resultsBody = document.getElementById("resultsBody");
 const SAVE_REQUEST_TIMEOUT_MS = 12000;
 const AVAILABILITY_REQUEST_TIMEOUT_MS = 8000;
 const MAX_PRESERVE_TIME_MS = 45000;
-const MAX_CONCURRENT_SAVES = 3;
+const MAX_CONCURRENT_SAVES = 5;
 const WORKER_STAGGER_MS = 350;
 
 let results = [];
