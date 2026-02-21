@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ArchiveLinks</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header>
+        <h1>ArchiveLinks</h1>
+        <p>
+          Upload a manuscript (<code>.pdf</code> or <code>.docx</code>), preserve each external link
+          via Wayback Machine, and export citation-ready archive URLs.
+        </p>
+      </header>
+
+      <section class="panel controls">
+        <h2>Phase 1: Extract</h2>
+        <label class="file-label" for="manuscript">Select manuscript</label>
+        <input id="manuscript" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+
+        <div class="actions">
+          <button id="extractBtn" type="button">Extract Links</button>
+        </div>
+
+        <p id="status" class="status">No file selected.</p>
+      </section>
+
+      <section id="phase2Panel" class="panel hidden">
+        <h2>Phase 2: Review and Preserve</h2>
+        <p class="hint">Remove links with <code>x</code>, add missing URLs manually, then preserve.</p>
+
+        <div class="inline-form">
+          <input id="addUrlInput" type="url" placeholder="https://example.org/source" />
+          <button id="addUrlBtn" type="button">Add URL</button>
+          <button id="preserveBtn" type="button" disabled>Preserve in Wayback</button>
+          <button id="downloadBtn" type="button" disabled>Download CSV</button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Original URL</th>
+                <th>Preserved Link</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js"></script>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
