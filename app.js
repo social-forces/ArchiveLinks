@@ -5,6 +5,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs
 const manuscriptInput = document.getElementById("manuscript");
 const extractBtn = document.getElementById("extractBtn");
 const preserveBtn = document.getElementById("preserveBtn");
+const retryBtn = document.getElementById("retryBtn");
 const downloadBtn = document.getElementById("downloadBtn");
 const addUrlBtn = document.getElementById("addUrlBtn");
 const addUrlInput = document.getElementById("addUrlInput");
@@ -152,6 +153,46 @@ preserveBtn.addEventListener("click", async () => {
   renderResults();
 });
 
+retryBtn.addEventListener("click", async () => {
+  const unresolvedItems = getUnresolvedItems();
+  if (unresolvedItems.length === 0) {
+    setStatus("No unresolved links to retry.");
+    return;
+  }
+
+  isPreserving = true;
+  hasPreserved = false;
+  updateActionStates();
+
+  for (const item of unresolvedItems) {
+    item.archivedUrl = "";
+    item.status = "ready";
+  }
+
+  renderResults();
+  setStatus(`Retrying ${unresolvedItems.length} unresolved link(s)...`);
+  await runPreservationPool(unresolvedItems);
+
+  const savedCount = results.filter((r) => r.status === "saved").length;
+  const timedOutCount = results.filter((r) => r.status === "timed out").length;
+  const failedCount = results.filter((r) => r.status === "save request failed").length;
+  const unresolved = results.length - savedCount;
+
+  if (unresolved > 0) {
+    setStatus(
+      `Retry done. Saved ${savedCount}/${results.length}. ${unresolved} unresolved (${timedOutCount} timed out, ${failedCount} failed).`,
+      true
+    );
+  } else {
+    setStatus(`Retry done. All ${results.length} links are saved.`);
+  }
+
+  isPreserving = false;
+  hasPreserved = true;
+  updateActionStates();
+  renderResults();
+});
+
 async function runPreservationPool(items) {
   const workerCount = Math.min(MAX_CONCURRENT_SAVES, items.length);
   let nextIndex = 0;
@@ -270,8 +311,10 @@ function resetWorkflow() {
 
 function updateActionStates() {
   const hasLinks = results.length > 0;
+  const hasUnresolved = getUnresolvedItems().length > 0;
 
   preserveBtn.disabled = isPreserving || !hasLinks;
+  retryBtn.disabled = isPreserving || !hasLinks || !hasUnresolved;
   addUrlBtn.disabled = isPreserving;
   addUrlInput.disabled = isPreserving;
   downloadBtn.disabled = isPreserving || !hasLinks || !hasPreserved;
@@ -312,6 +355,14 @@ function renderResults() {
     tr.appendChild(actionTd);
     resultsBody.appendChild(tr);
   });
+}
+
+function isUnresolvedStatus(status) {
+  return status === "not yet indexed" || status === "timed out" || status === "save request failed";
+}
+
+function getUnresolvedItems() {
+  return results.filter((row) => isUnresolvedStatus(row.status));
 }
 
 function cell(text) {
