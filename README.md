@@ -6,10 +6,11 @@ A static browser application that helps authors preserve cited web pages in the 
 
 1. Accepts manuscript upload (`.pdf` or `.docx`).
 2. Extracts all external HTTP(S) links locally in the browser.
-3. Opens a review stage where users can remove extracted links and add missing URLs manually.
-4. Sends each reviewed link to Wayback's **Save Page Now** endpoint.
-5. Polls Wayback availability for archived snapshot URLs.
-6. Exports a CSV of original links and preserved archive links.
+3. Opens a step-by-step review stage with bulk selection, deletion, and manual link add.
+4. Sends selected links to Wayback's **Save Page Now** endpoint (bounded parallel workers).
+5. Supports retrying unresolved links without reprocessing already archived ones.
+6. Polls Wayback availability for archived snapshot URLs with timeout/error handling.
+7. Exports a CSV of original links and preserved archive links.
 
 ## Why this architecture
 
@@ -27,6 +28,8 @@ python3 -m http.server 8000
 ```
 
 Then open [http://localhost:8000](http://localhost:8000).
+
+Documentation page: [http://localhost:8000/docs.html](http://localhost:8000/docs.html).
 
 ## Notes and limitations
 

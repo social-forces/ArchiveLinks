@@ -7,66 +7,82 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="app">
-      <header>
-        <h1>ArchiveLinks</h1>
-        <p>
-          Upload a manuscript (<code>.pdf</code> or <code>.docx</code>), preserve each external link
-          via Wayback Machine, and export citation-ready archive URLs.
-        </p>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="kicker">Social Forces Toolkit</p>
+          <h1>ArchiveLinks</h1>
+          <p class="subtitle">Preserve citation URLs in the Wayback Machine before publication.</p>
+        </div>
+        <nav class="topnav">
+          <a href="docs.html">Documentation</a>
+          <a href="https://github.com/social-forces/ArchiveLinks" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </nav>
       </header>
 
-      <section class="panel about">
-        <h2>About</h2>
-        <p>
-          ArchiveLinks is a lightweight citation-preservation tool for journals. It extracts URLs from
-          manuscripts and archives them in the Wayback Machine before publication.
-        </p>
-        <p class="about-links">
-          <a href="https://social-forces.github.io/ArchiveLinks/" target="_blank" rel="noopener noreferrer">Live Site</a>
-          <a href="https://github.com/social-forces/ArchiveLinks" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
-          <a href="https://web.archive.org/" target="_blank" rel="noopener noreferrer">Internet Archive</a>
-        </p>
+      <section class="trust-strip" aria-label="Trust indicators">
+        <span class="trust-chip">Local processing: manuscript stays in your browser</span>
+        <span class="trust-chip">No server required</span>
+        <span class="trust-chip">Built for journal workflows</span>
       </section>
 
-      <section class="panel controls">
-        <h2>Phase 1: Extract</h2>
-        <label class="file-label" for="manuscript">Select manuscript</label>
-        <input id="manuscript" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
-
-        <div class="actions">
-          <button id="extractBtn" type="button">Extract Links</button>
-        </div>
-
-        <p id="status" class="status">No file selected.</p>
+      <section class="stepper" aria-label="Workflow progress">
+        <div class="step is-active" data-step="1"><span>1</span><p>Upload</p></div>
+        <div class="step" data-step="2"><span>2</span><p>Review</p></div>
+        <div class="step" data-step="3"><span>3</span><p>Archive</p></div>
+        <div class="step" data-step="4"><span>4</span><p>Export</p></div>
       </section>
 
-      <section id="phase2Panel" class="panel hidden">
-        <h2>Phase 2: Review and Preserve</h2>
-        <p class="hint">Remove links with <code>x</code>, add missing URLs manually, then preserve.</p>
-
-        <div class="inline-form">
-          <input id="addUrlInput" type="url" placeholder="https://example.org/source" />
-          <button id="addUrlBtn" type="button">Add URL</button>
-          <button id="preserveBtn" type="button" disabled>Preserve in Wayback</button>
-          <button id="retryBtn" type="button" disabled>Retry Unresolved</button>
-          <button id="downloadBtn" type="button" disabled>Download CSV</button>
+      <section class="panel hero">
+        <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="Upload manuscript">
+          <input id="manuscript" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+          <p class="drop-title">Drop PDF or DOCX here</p>
+          <p class="drop-subtitle">or click to choose a manuscript file</p>
+          <button id="browseBtn" type="button" class="ghost-btn">Choose File</button>
         </div>
 
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Original URL</th>
-                <th>Preserved Link</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody id="resultsBody"></tbody>
-          </table>
+        <div class="hero-actions">
+          <p id="selectedFile" class="selected-file">No file selected.</p>
+          <button id="extractBtn" type="button" class="primary-btn" disabled>Extract Links</button>
         </div>
+      </section>
+
+      <section class="panel progress-panel hidden" id="progressPanel">
+        <div class="progress-head">
+          <p id="progressLabel">Working...</p>
+          <p id="progressPercent">0%</p>
+        </div>
+        <div class="progress-track" aria-hidden="true">
+          <div id="progressBar" class="progress-bar"></div>
+        </div>
+      </section>
+
+      <section class="panel review-panel hidden" id="reviewPanel">
+        <div class="review-head">
+          <h2>Review Links</h2>
+          <p class="muted">Edit links, select in bulk, then archive.</p>
+        </div>
+
+        <div class="toolbar">
+          <label class="checkbox-row">
+            <input id="selectAll" type="checkbox" />
+            <span>Select all</span>
+          </label>
+          <span id="selectionCount" class="muted">0 selected</span>
+          <button id="deleteSelectedBtn" type="button" class="ghost-btn" disabled>Delete Selected</button>
+          <button id="archiveSelectedBtn" type="button" class="primary-btn" disabled>Archive Selected</button>
+          <button id="retryBtn" type="button" class="ghost-btn" disabled>Retry Unresolved</button>
+          <button id="downloadBtn" type="button" class="ghost-btn" disabled>Download CSV</button>
+        </div>
+
+        <div class="manual-add">
+          <input id="addUrlInput" type="text" placeholder="Add URL manually (e.g., example.org/page)" />
+          <button id="addUrlBtn" type="button" class="ghost-btn">Add URL</button>
+        </div>
+
+        <div id="status" class="status" aria-live="polite">Upload and extract to begin.</div>
+
+        <div id="linkList" class="link-list" aria-live="polite"></div>
       </section>
     </main>
 

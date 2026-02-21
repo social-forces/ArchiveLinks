@@ -2,244 +2,196 @@ import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.worker.min.mjs";
 
-const manuscriptInput = document.getElementById("manuscript");
-const extractBtn = document.getElementById("extractBtn");
-const preserveBtn = document.getElementById("preserveBtn");
-const retryBtn = document.getElementById("retryBtn");
-const downloadBtn = document.getElementById("downloadBtn");
-const addUrlBtn = document.getElementById("addUrlBtn");
-const addUrlInput = document.getElementById("addUrlInput");
-const phase2Panel = document.getElementById("phase2Panel");
-const statusEl = document.getElementById("status");
-const resultsBody = document.getElementById("resultsBody");
-
 const SAVE_REQUEST_TIMEOUT_MS = 12000;
 const AVAILABILITY_REQUEST_TIMEOUT_MS = 8000;
 const MAX_PRESERVE_TIME_MS = 45000;
 const MAX_CONCURRENT_SAVES = 5;
 const WORKER_STAGGER_MS = 350;
 
-let results = [];
-let isPreserving = false;
-let hasPreserved = false;
+const manuscriptInput = document.getElementById("manuscript");
+const dropZone = document.getElementById("dropZone");
+const browseBtn = document.getElementById("browseBtn");
+const selectedFileEl = document.getElementById("selectedFile");
+const extractBtn = document.getElementById("extractBtn");
 
-manuscriptInput.addEventListener("change", () => {
-  const file = manuscriptInput.files?.[0];
-  resetWorkflow();
+const reviewPanel = document.getElementById("reviewPanel");
+const linkList = document.getElementById("linkList");
+const statusEl = document.getElementById("status");
 
-  if (!file) {
-    setStatus("No file selected.");
+const selectAllInput = document.getElementById("selectAll");
+const selectionCountEl = document.getElementById("selectionCount");
+const deleteSelectedBtn = document.getElementById("deleteSelectedBtn");
+const archiveSelectedBtn = document.getElementById("archiveSelectedBtn");
+const retryBtn = document.getElementById("retryBtn");
+const downloadBtn = document.getElementById("downloadBtn");
+const addUrlInput = document.getElementById("addUrlInput");
+const addUrlBtn = document.getElementById("addUrlBtn");
+
+const progressPanel = document.getElementById("progressPanel");
+const progressLabel = document.getElementById("progressLabel");
+const progressPercent = document.getElementById("progressPercent");
+const progressBar = document.getElementById("progressBar");
+
+const stepEls = Array.from(document.querySelectorAll(".step"));
+
+let items = [];
+let itemIdCounter = 0;
+let isExtracting = false;
+let isArchiving = false;
+let hasArchiveRun = false;
+
+browseBtn.addEventListener("click", () => manuscriptInput.click());
+
+dropZone.addEventListener("click", (event) => {
+  if (event.target === browseBtn) {
     return;
   }
-
-  setStatus(`Selected: ${file.name}`);
+  manuscriptInput.click();
 });
 
-extractBtn.addEventListener("click", async () => {
-  const file = manuscriptInput.files?.[0];
-  if (!file) {
-    setStatus("Choose a manuscript first.", true);
-    return;
-  }
-
-  try {
-    setStatus("Extracting links from document...");
-    const extractedUrls = await extractUrlsFromFile(file);
-
-    results = extractedUrls.map((url) => ({
-      originalUrl: url,
-      archivedUrl: "",
-      status: "ready"
-    }));
-
-    phase2Panel.classList.remove("hidden");
-    hasPreserved = false;
-    isPreserving = false;
-
-    renderResults();
-    updateActionStates();
-
-    if (extractedUrls.length === 0) {
-      setStatus("No external HTTP(S) links found. Add any missing links manually in Phase 2.", true);
-      return;
-    }
-
-    setStatus(`Found ${extractedUrls.length} unique external links. Review, edit, then preserve.`);
-  } catch (error) {
-    console.error(error);
-    setStatus(`Extraction failed: ${error.message}`, true);
-    updateActionStates();
+dropZone.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    manuscriptInput.click();
   }
 });
 
-addUrlBtn.addEventListener("click", addManualUrl);
+["dragenter", "dragover"].forEach((type) => {
+  dropZone.addEventListener(type, (event) => {
+    event.preventDefault();
+    dropZone.classList.add("is-dragging");
+  });
+});
+
+["dragleave", "drop"].forEach((type) => {
+  dropZone.addEventListener(type, (event) => {
+    event.preventDefault();
+    dropZone.classList.remove("is-dragging");
+  });
+});
+
+dropZone.addEventListener("drop", (event) => {
+  const file = event.dataTransfer?.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  manuscriptInput.files = transfer.files;
+  onFileSelected();
+});
+
+manuscriptInput.addEventListener("change", onFileSelected);
+extractBtn.addEventListener("click", onExtract);
+addUrlBtn.addEventListener("click", onAddManualUrl);
 addUrlInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
-    addManualUrl();
+    onAddManualUrl();
   }
 });
 
-resultsBody.addEventListener("click", (event) => {
+selectAllInput.addEventListener("change", () => {
+  const checked = selectAllInput.checked;
+  for (const row of items) {
+    row.selected = checked;
+  }
+  render();
+});
+
+linkList.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
     return;
   }
 
-  if (target.dataset.action !== "remove") {
+  const id = Number(target.dataset.id);
+  if (!Number.isInteger(id)) {
     return;
   }
 
-  if (isPreserving) {
+  const row = items.find((entry) => entry.id === id);
+  if (!row || isArchiving) {
     return;
   }
 
-  const idx = Number(target.dataset.index);
-  if (!Number.isInteger(idx) || idx < 0 || idx >= results.length) {
-    return;
-  }
-
-  if (hasPreserved) {
-    invalidatePreservation();
-  }
-
-  results.splice(idx, 1);
-  renderResults();
-  updateActionStates();
-
-  if (results.length === 0) {
-    setStatus("Link list is empty. Add URLs manually before preserving.", true);
-  } else {
-    setStatus(`Removed link. ${results.length} link(s) ready.`);
+  if (target.dataset.action === "remove") {
+    items = items.filter((entry) => entry.id !== id);
+    hasArchiveRun = hasSavedItem();
+    updateStatus(items.length ? "Link removed." : "No links left. Add links manually.", items.length === 0);
+    render();
   }
 });
 
-preserveBtn.addEventListener("click", async () => {
-  if (results.length === 0) {
-    setStatus("No URLs to preserve. Add links first.", true);
+linkList.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) {
     return;
   }
 
-  isPreserving = true;
-  hasPreserved = false;
-  updateActionStates();
-
-  for (const item of results) {
-    item.archivedUrl = "";
-    item.status = "ready";
+  if (target.dataset.action !== "select") {
+    return;
   }
 
-  renderResults();
-  setStatus(`Submitting ${results.length} links to Wayback Machine (${Math.min(MAX_CONCURRENT_SAVES, results.length)} at a time)...`);
-  await runPreservationPool(results);
-
-  const savedCount = results.filter((r) => r.status === "saved").length;
-  const timedOutCount = results.filter((r) => r.status === "timed out").length;
-  const failedCount = results.filter((r) => r.status === "save request failed").length;
-  const unresolved = results.length - savedCount;
-
-  if (unresolved > 0) {
-    setStatus(
-      `Done. Saved ${savedCount}/${results.length}. ${unresolved} unresolved (${timedOutCount} timed out, ${failedCount} failed). Retry unresolved links.`,
-      true
-    );
-  } else {
-    setStatus(`Done. Saved ${savedCount}/${results.length} links.`);
+  const id = Number(target.dataset.id);
+  const row = items.find((entry) => entry.id === id);
+  if (!row) {
+    return;
   }
 
-  isPreserving = false;
-  hasPreserved = true;
-  updateActionStates();
-  renderResults();
+  row.selected = target.checked;
+  renderSelectionState();
+});
+
+deleteSelectedBtn.addEventListener("click", () => {
+  if (isArchiving) {
+    return;
+  }
+
+  const before = items.length;
+  items = items.filter((row) => !row.selected);
+
+  const removed = before - items.length;
+  if (removed === 0) {
+    return;
+  }
+
+  hasArchiveRun = hasSavedItem();
+  updateStatus(`Deleted ${removed} selected link(s).`);
+  render();
+});
+
+archiveSelectedBtn.addEventListener("click", async () => {
+  const selected = items.filter((row) => row.selected);
+  if (selected.length === 0) {
+    updateStatus("Select at least one link to archive.", true);
+    return;
+  }
+
+  await runArchive(selected, "Archiving selected links");
 });
 
 retryBtn.addEventListener("click", async () => {
-  const unresolvedItems = getUnresolvedItems();
-  if (unresolvedItems.length === 0) {
-    setStatus("No unresolved links to retry.");
+  const unresolvedSelected = items.filter((row) => row.selected && isUnresolved(row.status));
+  const unresolvedAll = items.filter((row) => isUnresolved(row.status));
+  const target = unresolvedSelected.length ? unresolvedSelected : unresolvedAll;
+
+  if (target.length === 0) {
+    updateStatus("No unresolved links to retry.");
     return;
   }
 
-  isPreserving = true;
-  hasPreserved = false;
-  updateActionStates();
-
-  for (const item of unresolvedItems) {
-    item.archivedUrl = "";
-    item.status = "ready";
-  }
-
-  renderResults();
-  setStatus(`Retrying ${unresolvedItems.length} unresolved link(s)...`);
-  await runPreservationPool(unresolvedItems);
-
-  const savedCount = results.filter((r) => r.status === "saved").length;
-  const timedOutCount = results.filter((r) => r.status === "timed out").length;
-  const failedCount = results.filter((r) => r.status === "save request failed").length;
-  const unresolved = results.length - savedCount;
-
-  if (unresolved > 0) {
-    setStatus(
-      `Retry done. Saved ${savedCount}/${results.length}. ${unresolved} unresolved (${timedOutCount} timed out, ${failedCount} failed).`,
-      true
-    );
-  } else {
-    setStatus(`Retry done. All ${results.length} links are saved.`);
-  }
-
-  isPreserving = false;
-  hasPreserved = true;
-  updateActionStates();
-  renderResults();
+  await runArchive(target, "Retrying unresolved links");
 });
 
-async function runPreservationPool(items) {
-  const workerCount = Math.min(MAX_CONCURRENT_SAVES, items.length);
-  let nextIndex = 0;
-  let completed = 0;
-
-  async function worker(workerId) {
-    if (workerId > 0) {
-      await sleep(workerId * WORKER_STAGGER_MS);
-    }
-
-    while (nextIndex < items.length) {
-      const idx = nextIndex;
-      nextIndex += 1;
-      const item = items[idx];
-
-      item.status = "saving";
-      renderResults();
-
-      try {
-        const outcome = await preserveUrl(item.originalUrl);
-        item.archivedUrl = outcome.archivedUrl;
-        item.status = outcome.status;
-      } catch (error) {
-        item.status = "save request failed";
-        console.error(`Failed to save ${item.originalUrl}:`, error);
-      }
-
-      completed += 1;
-      setStatus(`Preserving links... ${completed}/${items.length} complete`);
-      renderResults();
-      await sleep(120);
-    }
-  }
-
-  await Promise.all(
-    Array.from({ length: workerCount }, (_, i) => worker(i))
-  );
-}
-
 downloadBtn.addEventListener("click", () => {
-  if (results.length === 0 || !hasPreserved) {
+  if (!hasArchiveRun || items.length === 0) {
     return;
   }
 
   const csvRows = [["original_url", "preserved_link", "status"]];
-
-  for (const row of results) {
+  for (const row of items) {
     csvRows.push([row.originalUrl, row.archivedUrl, row.status]);
   }
 
@@ -251,157 +203,341 @@ downloadBtn.addEventListener("click", () => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "citation-preservation-results.csv";
+  link.download = "archivelinks-results.csv";
   document.body.appendChild(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
 });
 
-function addManualUrl() {
-  if (isPreserving) {
+async function onExtract() {
+  const file = manuscriptInput.files?.[0];
+  if (!file) {
+    updateStatus("Choose a file first.", true);
     return;
   }
 
-  const candidate = normalizeUrl(addUrlInput.value);
-  if (!candidate) {
-    setStatus("Enter a valid HTTP(S) URL to add.", true);
+  if (isExtracting || isArchiving) {
     return;
   }
 
-  const duplicate = results.some((r) => r.originalUrl === candidate);
-  if (duplicate) {
-    setStatus("That URL is already in the list.", true);
+  isExtracting = true;
+  setProgress("Extracting links...", 5);
+  updateActionStates();
+
+  try {
+    const urls = await extractUrlsFromFile(file, (pct) => setProgress("Extracting links...", pct));
+    const unique = Array.from(new Set(urls.map(normalizeUrl).filter(Boolean)));
+
+    items = unique.map((url) => createItem(url, "extracted"));
+    hasArchiveRun = false;
+
+    reviewPanel.classList.remove("hidden");
+    stepTo(2);
+
+    if (items.length === 0) {
+      updateStatus("No external HTTP(S) links found. Add URLs manually.", true);
+    } else {
+      updateStatus(`Found ${items.length} links. Review and archive when ready.`);
+    }
+
+    setProgress("Extraction complete", 100);
+    render();
+  } catch (error) {
+    console.error(error);
+    updateStatus(`Extraction failed: ${error.message}`, true);
+    hideProgressSoon();
+  } finally {
+    isExtracting = false;
+    updateActionStates();
+  }
+}
+
+async function runArchive(targetItems, label) {
+  if (isArchiving || targetItems.length === 0) {
     return;
   }
 
-  if (hasPreserved) {
-    invalidatePreservation();
+  isArchiving = true;
+  stepTo(3);
+
+  for (const row of targetItems) {
+    if (row.status !== "saved") {
+      row.archivedUrl = "";
+      row.status = "ready";
+    }
   }
 
-  results.push({
-    originalUrl: candidate,
+  setProgress(`${label}...`, 0);
+  updateStatus(`${label} (${Math.min(MAX_CONCURRENT_SAVES, targetItems.length)} at a time)`);
+  render();
+  updateActionStates();
+
+  let completed = 0;
+  const total = targetItems.length;
+  let queueIndex = 0;
+  const workers = Math.min(MAX_CONCURRENT_SAVES, total);
+
+  const worker = async (workerIndex) => {
+    if (workerIndex > 0) {
+      await sleep(workerIndex * WORKER_STAGGER_MS);
+    }
+
+    while (queueIndex < total) {
+      const idx = queueIndex;
+      queueIndex += 1;
+
+      const row = targetItems[idx];
+      row.status = "saving";
+      render();
+
+      try {
+        const outcome = await preserveUrl(row.originalUrl);
+        row.archivedUrl = outcome.archivedUrl;
+        row.status = outcome.status;
+      } catch (error) {
+        row.status = "save request failed";
+        console.error(`Archive failed: ${row.originalUrl}`, error);
+      }
+
+      completed += 1;
+      const pct = Math.round((completed / total) * 100);
+      setProgress(`${label}...`, pct);
+      updateStatus(`Archiving ${completed}/${total} complete.`);
+      render();
+    }
+  };
+
+  await Promise.all(Array.from({ length: workers }, (_, i) => worker(i)));
+
+  hasArchiveRun = true;
+  isArchiving = false;
+
+  const saved = items.filter((row) => row.status === "saved").length;
+  const unresolved = items.filter((row) => isUnresolved(row.status)).length;
+  const timedOut = items.filter((row) => row.status === "timed out").length;
+  const failed = items.filter((row) => row.status === "save request failed").length;
+
+  if (unresolved > 0) {
+    updateStatus(
+      `Archive run finished. ${saved}/${items.length} saved. ${unresolved} unresolved (${timedOut} timed out, ${failed} failed). Use Retry Unresolved.`,
+      true
+    );
+  } else {
+    updateStatus(`Archive run finished. ${saved}/${items.length} saved.`);
+  }
+
+  setProgress("Archiving complete", 100);
+  stepTo(4);
+  render();
+  updateActionStates();
+}
+
+function onAddManualUrl() {
+  if (isArchiving || isExtracting) {
+    return;
+  }
+
+  const corrected = normalizeUrl(addUrlInput.value);
+  if (!corrected) {
+    updateStatus("Enter a valid URL (we accept example.org and will auto-fix common typos).", true);
+    return;
+  }
+
+  const exists = items.some((row) => row.originalUrl === corrected);
+  if (exists) {
+    updateStatus("That link is already listed.", true);
+    return;
+  }
+
+  items.push(createItem(corrected, "manual"));
+  addUrlInput.value = "";
+  reviewPanel.classList.remove("hidden");
+  stepTo(2);
+  updateStatus("Manual link added.");
+  render();
+}
+
+function createItem(url, source) {
+  const parsed = new URL(url);
+  return {
+    id: ++itemIdCounter,
+    originalUrl: url,
     archivedUrl: "",
-    status: "ready"
-  });
-
-  addUrlInput.value = "";
-  renderResults();
-  updateActionStates();
-  setStatus(`Added URL. ${results.length} link(s) ready.`);
+    status: "ready",
+    selected: false,
+    source,
+    domain: parsed.hostname,
+    path: parsed.pathname || "/"
+  };
 }
 
-function invalidatePreservation() {
-  for (const row of results) {
-    row.archivedUrl = "";
-    row.status = "ready";
+function onFileSelected() {
+  const file = manuscriptInput.files?.[0];
+
+  if (!file) {
+    selectedFileEl.textContent = "No file selected.";
+    extractBtn.disabled = true;
+    return;
   }
-  hasPreserved = false;
+
+  selectedFileEl.textContent = `Selected: ${file.name}`;
+  extractBtn.disabled = false;
+  stepTo(1);
 }
 
-function resetWorkflow() {
-  results = [];
-  isPreserving = false;
-  hasPreserved = false;
-  phase2Panel.classList.add("hidden");
-  addUrlInput.value = "";
-  renderResults();
+function render() {
+  renderSelectionState();
   updateActionStates();
+
+  if (items.length === 0) {
+    linkList.innerHTML = `<div class="empty-state">No links yet. Extract from a manuscript or add manually.</div>`;
+    return;
+  }
+
+  linkList.innerHTML = items.map(renderCard).join("");
+}
+
+function renderCard(row) {
+  const statusClass = statusClassFor(row.status);
+  const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(row.domain)}&sz=32`;
+  const sourceLabel = row.source === "manual" ? "Manual" : "Extracted";
+  const previewTitle = `${row.domain}${row.path}`;
+  const archivedHtml = row.archivedUrl
+    ? `<a class="archived-link" href="${escapeHtml(row.archivedUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.archivedUrl)}</a>`
+    : `<span class="muted">Not archived yet</span>`;
+
+  return `
+    <article class="link-card" data-id="${row.id}">
+      <div class="card-left">
+        <label class="checkbox-row card-check">
+          <input type="checkbox" data-action="select" data-id="${row.id}" ${row.selected ? "checked" : ""} />
+        </label>
+        <div class="preview-badge" title="${escapeHtml(previewTitle)}">
+          <img src="${faviconUrl}" alt="" loading="lazy" />
+          <span>${escapeHtml(row.domain)}</span>
+        </div>
+      </div>
+      <div class="card-main">
+        <div class="card-head">
+          <span class="pill ${statusClass}">${escapeHtml(statusLabel(row.status))}</span>
+          <span class="source-tag">${sourceLabel}</span>
+        </div>
+        <a class="source-link" href="${escapeHtml(row.originalUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.originalUrl)}</a>
+        <div class="archived-row">
+          ${archivedHtml}
+        </div>
+      </div>
+      <div class="card-actions">
+        <button type="button" class="icon-btn" data-action="remove" data-id="${row.id}" ${isArchiving ? "disabled" : ""}>×</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderSelectionState() {
+  const selectedCount = items.filter((row) => row.selected).length;
+  selectionCountEl.textContent = `${selectedCount} selected`;
+
+  if (items.length === 0) {
+    selectAllInput.checked = false;
+    selectAllInput.indeterminate = false;
+    return;
+  }
+
+  selectAllInput.checked = selectedCount === items.length;
+  selectAllInput.indeterminate = selectedCount > 0 && selectedCount < items.length;
 }
 
 function updateActionStates() {
-  const hasLinks = results.length > 0;
-  const hasUnresolved = getUnresolvedItems().length > 0;
+  const hasItems = items.length > 0;
+  const selectedCount = items.filter((row) => row.selected).length;
+  const hasUnresolved = items.some((row) => isUnresolved(row.status));
 
-  preserveBtn.disabled = isPreserving || !hasLinks;
-  retryBtn.disabled = isPreserving || !hasLinks || !hasUnresolved;
-  addUrlBtn.disabled = isPreserving;
-  addUrlInput.disabled = isPreserving;
-  downloadBtn.disabled = isPreserving || !hasLinks || !hasPreserved;
+  extractBtn.disabled = isExtracting || !manuscriptInput.files?.[0];
+  addUrlBtn.disabled = isExtracting || isArchiving;
+  addUrlInput.disabled = isExtracting || isArchiving;
+
+  selectAllInput.disabled = isExtracting || isArchiving || !hasItems;
+  deleteSelectedBtn.disabled = isExtracting || isArchiving || selectedCount === 0;
+  archiveSelectedBtn.disabled = isExtracting || isArchiving || selectedCount === 0;
+  retryBtn.disabled = isExtracting || isArchiving || !hasUnresolved;
+  downloadBtn.disabled = isExtracting || isArchiving || !hasArchiveRun || !hasItems;
 }
 
-function setStatus(message, isWarning = false) {
+function updateStatus(message, warning = false) {
   statusEl.textContent = message;
-  statusEl.classList.toggle("warning", isWarning);
+  statusEl.classList.toggle("is-warning", warning);
 }
 
-function renderResults() {
-  resultsBody.innerHTML = "";
+function setProgress(label, percent) {
+  progressPanel.classList.remove("hidden");
+  progressLabel.textContent = label;
+  const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+  progressPercent.textContent = `${clamped}%`;
+  progressBar.style.width = `${clamped}%`;
+}
 
-  results.forEach((row, idx) => {
-    const tr = document.createElement("tr");
-
-    tr.appendChild(cell(String(idx + 1)));
-    tr.appendChild(linkCell(row.originalUrl));
-
-    if (row.archivedUrl) {
-      tr.appendChild(linkCell(row.archivedUrl));
-    } else {
-      tr.appendChild(cell("-"));
+function hideProgressSoon() {
+  setTimeout(() => {
+    if (isExtracting || isArchiving) {
+      return;
     }
-
-    tr.appendChild(cell(row.status));
-
-    const actionTd = document.createElement("td");
-    const removeBtn = document.createElement("button");
-    removeBtn.type = "button";
-    removeBtn.className = "remove-btn";
-    removeBtn.dataset.action = "remove";
-    removeBtn.dataset.index = String(idx);
-    removeBtn.textContent = "x";
-    removeBtn.disabled = isPreserving;
-    actionTd.appendChild(removeBtn);
-
-    tr.appendChild(actionTd);
-    resultsBody.appendChild(tr);
-  });
+    progressPanel.classList.add("hidden");
+  }, 1200);
 }
 
-function isUnresolvedStatus(status) {
+function stepTo(step) {
+  for (const stepEl of stepEls) {
+    const n = Number(stepEl.dataset.step);
+    stepEl.classList.toggle("is-active", n === step);
+    stepEl.classList.toggle("is-complete", n < step);
+  }
+}
+
+function statusClassFor(status) {
+  if (status === "saved") return "is-success";
+  if (status === "saving") return "is-pending";
+  if (status === "not yet indexed" || status === "timed out") return "is-warning";
+  if (status === "save request failed") return "is-danger";
+  return "is-neutral";
+}
+
+function statusLabel(status) {
+  if (status === "ready") return "Ready";
+  if (status === "saving") return "Archiving";
+  if (status === "saved") return "Archived";
+  if (status === "not yet indexed") return "Not Indexed Yet";
+  if (status === "timed out") return "Timed Out";
+  if (status === "save request failed") return "Failed";
+  return status;
+}
+
+function isUnresolved(status) {
   return status === "not yet indexed" || status === "timed out" || status === "save request failed";
 }
 
-function getUnresolvedItems() {
-  return results.filter((row) => isUnresolvedStatus(row.status));
+function hasSavedItem() {
+  return items.some((row) => row.status === "saved");
 }
 
-function cell(text) {
-  const td = document.createElement("td");
-  td.textContent = text;
-  return td;
-}
-
-function linkCell(url) {
-  const td = document.createElement("td");
-  const a = document.createElement("a");
-  a.href = url;
-  a.target = "_blank";
-  a.rel = "noopener noreferrer";
-  a.textContent = url;
-  td.appendChild(a);
-  return td;
-}
-
-async function extractUrlsFromFile(file) {
+async function extractUrlsFromFile(file, onProgress) {
   const ext = file.name.toLowerCase().split(".").pop();
 
-  let rawUrls = [];
   if (ext === "pdf") {
-    rawUrls = await extractUrlsFromPdf(file);
-  } else if (ext === "docx") {
-    rawUrls = await extractUrlsFromDocx(file);
-  } else {
-    throw new Error("Unsupported file type. Use .pdf or .docx.");
+    return extractUrlsFromPdf(file, onProgress);
   }
 
-  const cleaned = rawUrls
-    .map(normalizeUrl)
-    .filter(Boolean);
+  if (ext === "docx") {
+    const urls = await extractUrlsFromDocx(file);
+    onProgress?.(100);
+    return urls;
+  }
 
-  return Array.from(new Set(cleaned));
+  throw new Error("Unsupported file type. Use .pdf or .docx.");
 }
 
-async function extractUrlsFromPdf(file) {
+async function extractUrlsFromPdf(file, onProgress) {
   const data = new Uint8Array(await file.arrayBuffer());
   const pdf = await pdfjsLib.getDocument({ data }).promise;
   const found = [];
@@ -411,13 +547,12 @@ async function extractUrlsFromPdf(file) {
     const annotations = await page.getAnnotations();
 
     for (const ann of annotations) {
-      if (ann.url) {
-        found.push(ann.url);
-      }
-      if (ann.unsafeUrl) {
-        found.push(ann.unsafeUrl);
-      }
+      if (ann.url) found.push(ann.url);
+      if (ann.unsafeUrl) found.push(ann.unsafeUrl);
     }
+
+    const pct = Math.round((pageNo / pdf.numPages) * 100);
+    onProgress?.(pct);
   }
 
   return found;
@@ -444,10 +579,20 @@ function normalizeUrl(input) {
   }
 
   let candidate = input.trim();
+  candidate = candidate.replace(/\s+/g, "");
+  candidate = candidate.replace(/^hxxps?:\/\//i, (s) => s.toLowerCase().replace("hxxp", "http"));
   candidate = candidate.replace(/[),.;:]+$/, "");
 
   if (!candidate) {
     return null;
+  }
+
+  if (candidate.startsWith("www.")) {
+    candidate = `https://${candidate}`;
+  }
+
+  if (!/^https?:\/\//i.test(candidate) && /^[\w.-]+\.[a-z]{2,}/i.test(candidate)) {
+    candidate = `https://${candidate}`;
   }
 
   try {
@@ -465,26 +610,22 @@ function normalizeUrl(input) {
 
 async function preserveUrl(originalUrl) {
   const saveEndpoint = `https://web.archive.org/save/${encodeURIComponent(originalUrl)}`;
-
-  let saveRequestAttempted = false;
+  let saveAttempted = false;
 
   try {
     await fetchWithTimeout(
       saveEndpoint,
-      {
-        method: "GET",
-        mode: "no-cors",
-        cache: "no-store"
-      },
+      { method: "GET", mode: "no-cors", cache: "no-store" },
       SAVE_REQUEST_TIMEOUT_MS
     );
-    saveRequestAttempted = true;
+    saveAttempted = true;
   } catch {
-    await triggerImageRequest(saveEndpoint);
-    saveRequestAttempted = true;
+    await triggerImageRequest(saveEndpoint, SAVE_REQUEST_TIMEOUT_MS);
+    saveAttempted = true;
   }
 
   const availability = await pollForArchivedUrl(originalUrl, MAX_PRESERVE_TIME_MS);
+
   if (availability.archivedUrl) {
     return { archivedUrl: availability.archivedUrl, status: "saved" };
   }
@@ -493,7 +634,7 @@ async function preserveUrl(originalUrl) {
     return { archivedUrl: "", status: "timed out" };
   }
 
-  if (saveRequestAttempted) {
+  if (saveAttempted) {
     return { archivedUrl: "", status: "not yet indexed" };
   }
 
@@ -515,11 +656,7 @@ async function pollForArchivedUrl(originalUrl, maxDurationMs) {
     try {
       const response = await fetchWithTimeout(
         availabilityEndpoint,
-        {
-          method: "GET",
-          headers: { Accept: "application/json" },
-          cache: "no-store"
-        },
+        { method: "GET", headers: { Accept: "application/json" }, cache: "no-store" },
         AVAILABILITY_REQUEST_TIMEOUT_MS
       );
 
@@ -535,7 +672,7 @@ async function pollForArchivedUrl(originalUrl, maxDurationMs) {
         }
       }
     } catch (error) {
-      console.warn("Availability check failed:", error);
+      console.warn("Availability check failed", error);
     }
 
     await sleep(delayMs);
@@ -555,20 +692,43 @@ async function fetchWithTimeout(url, options, timeoutMs) {
   }
 }
 
+function triggerImageRequest(url, timeoutMs) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const timer = setTimeout(() => resolve(), timeoutMs);
+
+    img.onload = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+
+    img.onerror = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+
+    img.src = url;
+  });
+}
+
 function escapeCsvCell(value) {
   const v = value ?? "";
   return `"${String(v).replaceAll('"', '""')}"`;
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function triggerImageRequest(url) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve();
-    img.onerror = () => resolve();
-    img.src = url;
-  });
-}
+stepTo(1);
+render();
+updateActionStates();
